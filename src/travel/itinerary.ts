@@ -519,16 +519,6 @@ export const renderItinerary = (itineraryData: any, isMobile: boolean, chatMessa
       const w: any = window as any;
       if (!w.html2pdf) throw new Error('html2pdf not available');
 
-      const container = bubble.querySelector('.itinerary-tabs-container') as HTMLElement | null;
-      if (!container) return;
-
-      // Clone printable content and reveal all pages for export
-      const printable = container.cloneNode(true) as HTMLElement;
-      printable.querySelectorAll('.itinerary-page').forEach(el => { (el as HTMLElement).classList.add('page-active'); (el as HTMLElement).style.display = 'block'; });
-      // Remove any PDF buttons inside the clone
-      printable.querySelectorAll('.pdf-download-btn').forEach(el => el.remove());
-
-      // Prepare wrapper with a simple header
       const wrapper = document.createElement('div');
       wrapper.style.background = '#ffffff';
       wrapper.style.padding = '24pt';
@@ -540,7 +530,18 @@ export const renderItinerary = (itineraryData: any, isMobile: boolean, chatMessa
           .pt-title{font-size:16pt;font-weight:700;color:#111827;margin:0}
           .pt-meta{font-size:9pt;color:#6b7280;margin:2pt 0 0}
           .pt-logo{height:28pt;width:auto}
-          .tabs-header{display:flex;justify-content:space-between;align-items:center;padding-bottom:8pt;border-bottom:1px solid #e5e7eb;margin-bottom:10pt}
+          .section{margin:14pt 0}
+          .sec-title{font-size:14pt;font-weight:700;color:#111827;margin:0 0 6pt}
+          .sub-title{font-size:12pt;font-weight:700;color:#111827;margin:10pt 0 6pt}
+          .muted{color:#6b7280;font-size:10pt}
+          .no-break{break-inside:avoid;page-break-inside:avoid}
+          .card{border:1px solid #e5e7eb;border-radius:10pt;overflow:hidden;margin:10pt 0}
+          .img{display:block;width:100%;height:auto}
+          .meta{padding:8pt 10pt}
+          .meta .name{font-weight:700;color:#111827;margin:0 0 4pt}
+          .meta .rating{color:#f59e0b;font-size:10pt;margin:2pt 0}
+          .meta .desc{color:#4b5563;font-size:10pt;margin:4pt 0 0;white-space:pre-wrap}
+          .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:10pt}
         </style>
         <div class="pt-header">
           <img class="pt-logo" src="https://cdn.builder.io/api/v1/image/assets%2F82c0001c5b3640cb80e6ddfae3607779%2Fc6120727ebef4118a2235d13cbf9dfcb?format=webp&width=400" crossorigin="anonymous" />
@@ -550,25 +551,125 @@ export const renderItinerary = (itineraryData: any, isMobile: boolean, chatMessa
           </div>
         </div>
       `;
-      // Add dynamic trip title if present
-      try {
-        const tripTitle = (itineraryData?.overview?.title || itineraryData?.title || '').toString();
-        if (tripTitle) {
-          const h = document.createElement('h2');
-          h.textContent = tripTitle;
-          h.style.fontSize = '14pt'; h.style.fontWeight = '700'; h.style.color = '#111827'; h.style.margin = '6pt 0 8pt';
-          wrapper.appendChild(h);
-        }
-      } catch {}
 
-      // Ensure images export correctly
-      printable.querySelectorAll('img').forEach(img => {
-        (img as HTMLImageElement).setAttribute('crossorigin','anonymous');
-        (img as HTMLImageElement).style.maxWidth = '100%';
-      });
+      const esc = (v:any)=> (v==null?'' : String(v));
+      const add = (html:string)=> { wrapper.insertAdjacentHTML('beforeend', html); };
+      const ensureImgCORS = (root: HTMLElement)=> root.querySelectorAll('img').forEach(i=>{ (i as HTMLImageElement).setAttribute('crossorigin','anonymous'); (i as HTMLImageElement).style.maxWidth='100%'; });
 
-      wrapper.appendChild(printable);
+      // Overview
+      const ov = itineraryData?.overview || {};
+      if (ov?.title) add(`<h2 class="sec-title">${esc(ov.title)}</h2>`);
+      if (ov?.summary) add(`<p class="muted">${esc(ov.summary)}</p>`);
+      const stats = ov?.stats || {};
+      const checkIn = stats?.checkInDate ? new Date(stats.checkInDate).toLocaleDateString() : '';
+      const checkOut = stats?.checkOutDate ? new Date(stats.checkOutDate).toLocaleDateString() : '';
+      const statsLine = [stats?.durationInDays?`${esc(stats.durationInDays)} days`:'' , stats?.placesVisited?`${esc(stats.placesVisited)} places`:'' , checkIn?`Check-in: ${checkIn}`:'' , checkOut?`Check-out: ${checkOut}`:''].filter(Boolean).join('  •  ');
+      if (statsLine) add(`<p class="muted">${statsLine}</p>`);
+
+      // Daily Plan (image first, then details; avoid splitting)
+      const dp: any[] = Array.isArray(itineraryData?.dailyPlan) ? itineraryData.dailyPlan : [];
+      if (dp.length) {
+        add(`<div class="section"><div class="sec-title">Daily Plan</div></div>`);
+        dp.forEach((day:any)=>{
+          add(`<div class="sub-title">Day ${esc(day?.day)}: ${esc(day?.title||'')}</div>`);
+          (day?.activities||[]).forEach((act:any)=>{
+            const img = (act?.imageLinks && act.imageLinks[0]) || (act?.imagelinks && act.imagelinks[0]) || '';
+            const name = esc(act?.name||'');
+            const rating = act?.rating ? `⭐ ${esc(act.rating)}` : '';
+            const desc = esc(act?.description||'');
+            add(`
+              <div class="card no-break">
+                ${img ? `<img class="img" src="${img}" alt="${name}">` : ''}
+                <div class="meta">
+                  <div class="name">${name}</div>
+                  ${rating?`<div class="rating">${rating}</div>`:''}
+                  ${desc?`<div class="desc">${desc}</div>`:''}
+                </div>
+              </div>
+            `);
+          });
+        });
+      }
+
+      // Explore More (image first then data)
+      const em: any[] = Array.isArray(itineraryData?.exploreMore) ? itineraryData.exploreMore : [];
+      if (em.length) {
+        add(`<div class="section"><div class="sec-title">Explore More</div></div>`);
+        em.forEach((it:any)=>{
+          const img = (it?.imageLinks && it.imageLinks[0]) || (it?.imagelinks && it.imagelinks[0]) || '';
+          const name = esc(it?.name||'');
+          const rating = it?.rating ? `⭐ ${esc(it.rating)}` : '';
+          const desc = esc(it?.description || it?.overview || '');
+          add(`
+            <div class="card no-break">
+              ${img ? `<img class="img" src="${img}" alt="${name}">` : ''}
+              <div class="meta">
+                <div class="name">${name}</div>
+                ${rating?`<div class="rating">${rating}</div>`:''}
+                ${desc?`<div class="desc">${desc}</div>`:''}
+              </div>
+            </div>
+          `);
+        });
+      }
+
+      // Hotels (image then data)
+      const hotels = itineraryData?.hotelRecommendations || {};
+      const cheapest = Array.isArray(hotels?.cheapest)? hotels.cheapest : [];
+      const highest = Array.isArray(hotels?.highestRated)? hotels.highestRated : [];
+      if (cheapest.length || highest.length) {
+        add(`<div class="section"><div class="sec-title">Hotel Recommendations</div></div>`);
+        if (cheapest.length) add(`<div class="sub-title">Cheapest Options</div>`);
+        cheapest.forEach((h:any)=>{
+          const img = (h?.imageLinks && h.imageLinks[0]) || (h?.imagelinks && h.imagelinks[0]) || '';
+          const name = esc(h?.name||'');
+          const rating = h?.rating ? `⭐ ${esc(h.rating)}` : '';
+          const price = h?.price!=null ? `₹ ${Number(h.price).toLocaleString('en-IN')}` : '';
+          const amenities = Array.isArray(h?.amenities)? h.amenities.slice(0,8).join(', ') : '';
+          add(`
+            <div class="card no-break">
+              ${img ? `<img class="img" src="${img}" alt="${name}">` : ''}
+              <div class="meta">
+                <div class="name">${name}</div>
+                <div class="muted">${[rating, price].filter(Boolean).join('  •  ')}</div>
+                ${amenities?`<div class="desc">Amenities: ${amenities}</div>`:''}
+              </div>
+            </div>
+          `);
+        });
+        if (highest.length) add(`<div class="sub-title">Highest Rated</div>`);
+        highest.forEach((h:any)=>{
+          const img = (h?.imageLinks && h.imageLinks[0]) || (h?.imagelinks && h.imagelinks[0]) || '';
+          const name = esc(h?.name||'');
+          const rating = h?.rating ? `⭐ ${esc(h.rating)}` : '';
+          const price = h?.price!=null ? `₹ ${Number(h.price).toLocaleString('en-IN')}` : '';
+          const amenities = Array.isArray(h?.amenities)? h.amenities.slice(0,8).join(', ') : '';
+          add(`
+            <div class="card no-break">
+              ${img ? `<img class="img" src="${img}" alt="${name}">` : ''}
+              <div class="meta">
+                <div class="name">${name}</div>
+                <div class="muted">${[rating, price].filter(Boolean).join('  •  ')}</div>
+                ${amenities?`<div class="desc">Amenities: ${amenities}</div>`:''}
+              </div>
+            </div>
+          `);
+        });
+      }
+
+      // Flights (keep as-is by cloning current flights section)
+      const flightsEl = bubble.querySelector('#flights-page') as HTMLElement | null;
+      if (flightsEl) {
+        const clone = flightsEl.cloneNode(true) as HTMLElement;
+        // ensure visible
+        clone.style.display = 'block';
+        // remove tab-only wrappers if any
+        add(`<div class="section"><div class="sec-title">Flights</div></div>`);
+        wrapper.appendChild(clone);
+      }
+
       document.body.appendChild(wrapper);
+      ensureImgCORS(wrapper);
 
       const opt = {
         margin: [20, 15, 20, 15],
@@ -576,7 +677,7 @@ export const renderItinerary = (itineraryData: any, isMobile: boolean, chatMessa
         image: { type: 'jpeg', quality: 0.98 },
         html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
         jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' },
-        pagebreak: { mode: ['css', 'legacy'] }
+        pagebreak: { mode: ['css', 'legacy'], avoid: ['img', '.no-break'] }
       } as any;
 
       await w.html2pdf().from(wrapper).set(opt).save();
