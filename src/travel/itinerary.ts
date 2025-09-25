@@ -641,7 +641,7 @@ export const renderItinerary = (itineraryData: any, isMobile: boolean, chatMessa
         highest.forEach((h:any)=>{
           const img = (h?.imageLinks && h.imageLinks[0]) || (h?.imagelinks && h.imagelinks[0]) || '';
           const name = esc(h?.name||'');
-          const rating = h?.rating ? `⭐ ${esc(h.rating)}` : '';
+          const rating = h?.rating ? `�� ${esc(h.rating)}` : '';
           const price = h?.price!=null ? `₹ ${Number(h.price).toLocaleString('en-IN')}` : '';
           const amenities = Array.isArray(h?.amenities)? h.amenities.slice(0,8).join(', ') : '';
           add(`
@@ -670,6 +670,27 @@ export const renderItinerary = (itineraryData: any, isMobile: boolean, chatMessa
 
       document.body.appendChild(wrapper);
       ensureImgCORS(wrapper);
+
+      // Preload images and replace any that fail to load with placeholder to avoid html2canvas errors
+      const imgs = Array.from(wrapper.querySelectorAll('img')) as HTMLImageElement[];
+      const preload = (imgEl: HTMLImageElement) => new Promise<void>((resolve) => {
+        const test = new Image();
+        test.crossOrigin = 'anonymous';
+        let settled = false;
+        const onSuccess = () => { try { imgEl.setAttribute('crossorigin','anonymous'); imgEl.referrerPolicy = 'no-referrer'; } catch {};
+          if (!settled) { settled = true; resolve(); }
+        };
+        const onFail = () => { try { imgEl.src = imageComingSoon; imgEl.setAttribute('crossorigin','anonymous'); imgEl.referrerPolicy = 'no-referrer'; } catch {};
+          if (!settled) { settled = true; resolve(); }
+        };
+        test.onload = onSuccess;
+        test.onerror = onFail;
+        // timeout in 2500ms
+        const to = setTimeout(() => { onFail(); }, 2500);
+        test.src = imgEl.src || '';
+      });
+
+      await Promise.all(imgs.map(i => preload(i)));
 
       const opt = {
         margin: [20, 15, 20, 15],
