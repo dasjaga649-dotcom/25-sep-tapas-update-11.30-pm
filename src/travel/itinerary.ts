@@ -513,327 +513,235 @@ export const renderItinerary = (itineraryData: any, isMobile: boolean, chatMessa
   };
   setupSummaryToggles();
 
-  // PDF generation (using jsPDF via CDN)
-  const loadJsPDF = (): Promise<any> => new Promise((resolve, reject) => {
-    const w = window as any;
-    if (w.jspdf && w.jspdf.jsPDF) return resolve(w.jspdf.jsPDF);
-    const s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-    s.async = true;
-    s.onload = () => resolve((window as any).jspdf.jsPDF);
-    s.onerror = () => reject(new Error('Failed to load jsPDF'));
-    document.head.appendChild(s);
-  });
-
-  const clean = (v: any) => String(v ?? '').replace(/[‘’‛]/g, "'").replace(/[“”„‟]/g, '"').replace(/\u200B/g, '').trim();
-  const formatINR = (v: any) => {
-    const num = parseFloat(String(v ?? '').replace(/[^0-9.]/g, ''));
-    return isNaN(num) ? clean(v) : `₹ ${num.toLocaleString('en-IN')}`;
-  };
-
-  const toDataURL = (url: string): Promise<string> => new Promise((resolve) => {
+  // PDF generation using html2pdf (captures the itinerary content DOM)
+  const downloadItineraryPdf = async () => {
     try {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        try {
-          const c = document.createElement('canvas');
-          const maxW = 240; const ratio = Math.min(1, maxW / img.width);
-          c.width = Math.max(1, Math.floor(img.width * ratio));
-          c.height = Math.max(1, Math.floor(img.height * ratio));
-          const ctx = c.getContext('2d');
-          if (ctx) ctx.drawImage(img, 0, 0, c.width, c.height);
-          resolve(c.toDataURL('image/jpeg', 0.85));
-        } catch { resolve(''); }
-      };
-      img.onerror = () => resolve('');
-      img.src = url;
-    } catch { resolve(''); }
-  });
+      const w: any = window as any;
+      if (!w.html2pdf) throw new Error('html2pdf not available');
 
-  const addTextBlock = (doc: any, text: string, x: number, y: number, maxWidth: number, lineHeight = 16) => {
-    const lines = doc.splitTextToSize(clean(text), maxWidth);
-    lines.forEach((line: string) => { doc.text(line, x, y); y += lineHeight; });
-    return y;
-  };
+      const wrapper = document.createElement('div');
+      wrapper.style.background = '#ffffff';
+      wrapper.style.padding = '24pt';
+      wrapper.style.maxWidth = '900px';
+      wrapper.style.margin = '0 auto';
+      wrapper.innerHTML = `
+        <style>
+          .title{font-size:18pt;font-weight:800;color:#111827;margin:0 0 2pt}
+          .muted{color:#6b7280;font-size:10pt}
+          .section{margin:16pt 0}
+          .sec-title{font-size:14pt;font-weight:700;color:#111827;margin:0 0 8pt}
+          .sub-title{font-size:12pt;font-weight:700;color:#111827;margin:10pt 0 6pt}
+          .pill-row{display:flex;flex-wrap:wrap;gap:6pt;margin:6pt 0}
+          .pill{display:inline-block;padding:4pt 8pt;border-radius:9999px;background:#eef2ff;color:#1f2937;font-size:9.5pt;border:1px solid #e5e7eb}
+          .summary{margin:8pt 0}
+          .summary-item{margin:4pt 0;font-size:10.5pt;color:#374151}
+          .no-break{break-inside:avoid;page-break-inside:avoid}
+          .page-day{page-break-after: always; break-after: page;}
+          .act-card{border:1px solid #e5e7eb;border-radius:10pt;padding:8pt;margin:8pt 0}
+          .act-name{font-weight:700;color:#111827;margin:0 0 4pt;font-size:11pt}
+          .act-meta{color:#f59e0b;font-size:10pt;margin:0 0 4pt}
+          .act-img-right{float:right;width:35%;max-height:140pt;object-fit:cover;margin-left:10pt;border-radius:8pt}
+          .act-desc{color:#4b5563;font-size:10pt;line-height:1.45}
+          .card{border:1px solid #e5e7eb;border-radius:10pt;overflow:hidden;margin:8pt 0}
+          .img{display:block;width:100%;height:auto}
+          .meta{padding:8pt 10pt}
+          .meta .name{font-weight:700;color:#111827;margin:0 0 4pt}
+          .meta .rating{color:#f59e0b;font-size:10pt;margin:2pt 0}
+          .meta .desc{color:#4b5563;font-size:10pt;margin:4pt 0 0;white-space:pre-wrap}
+          .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:10pt}
+          .hotel-row{display:grid;grid-template-columns:80pt 1fr;gap:8pt;align-items:start}
+          .hotel-img{width:80pt;height:60pt;object-fit:cover;border-radius:6pt}
+          .flight-card{border:1px solid #e5e7eb;border-radius:10pt;padding:8pt;margin:8pt 0;display:grid;grid-template-columns:42pt 1fr auto;gap:8pt;align-items:center}
+          .flight-logo{width:42pt;height:42pt;object-fit:contain;border-radius:6pt}
+          .flight-title{font-weight:700;color:#111827;font-size:11pt}
+          .flight-sub{color:#374151;font-size:10pt}
+          .flight-price{font-weight:800;color:#111827;font-size:11pt}
+        </style>
+      `;
 
-  const addHeading = (doc: any, text: string, x: number, y: number, size = 16, color: [number,number,number] = [30,64,175]) => {
-    doc.setTextColor(color[0], color[1], color[2]);
-    doc.setFontSize(size); doc.setFont(undefined, 'bold'); doc.text(clean(text), x, y);
-    doc.setTextColor(33, 37, 41); doc.setFontSize(11); doc.setFont(undefined, 'normal');
-    return y + 12;
-  };
+      const esc = (v:any)=> (v==null?'' : String(v));
+      const add = (html:string)=> { wrapper.insertAdjacentHTML('beforeend', html); };
+      const ensureImgCORS = (root: HTMLElement)=> root.querySelectorAll('img').forEach(i=>{ (i as HTMLImageElement).setAttribute('crossorigin','anonymous'); (i as HTMLImageElement).style.maxWidth='100%'; });
 
-  const divider = (doc: any, y: number, margin: number, maxWidth: number) => {
-    doc.setDrawColor(229,231,235); doc.line(margin, y, margin + maxWidth, y); return y + 12;
-  };
-
-  const ensureSpace = (doc: any, y: number, margin: number) => {
-    const pageH = doc.internal.pageSize.getHeight();
-    if (y > pageH - margin) { doc.addPage(); return margin; }
-    return y;
-  };
-
-  const decoratePages = (doc: any, title: string) => {
-    const pageCount = doc.getNumberOfPages();
-    for (let i = 1; i <= pageCount; i++) {
-      doc.setPage(i);
-      const w = doc.internal.pageSize.getWidth();
-      const h = doc.internal.pageSize.getHeight();
-
-      // Header with gradient-like effect
-      doc.setFillColor(59, 130, 246); doc.rect(0, 0, w, 50, 'F');
-      doc.setFillColor(99, 102, 241); doc.rect(0, 0, w, 30, 'F');
-
-      doc.setTextColor(255,255,255); doc.setFontSize(14); doc.setFont(undefined, 'bold');
-      doc.text(clean(title || 'Travel Itinerary'), 40, 22);
-
-      // Footer
-      doc.setDrawColor(229,231,235); doc.line(40, h - 40, w - 40, h - 40);
-      doc.setTextColor(107,114,128); doc.setFontSize(9); doc.setFont(undefined, 'normal');
-      doc.text(`Page ${i} of ${pageCount}`, w - 40, h - 25, { align: 'right' });
-      doc.text('Generated by Tapas Travel AI', 40, h - 25);
-    }
-  };
-
-  const genPdf = async () => {
-    try {
-      const jsPDF = await loadJsPDF();
-      const doc = new jsPDF('p', 'pt', 'a4');
-      doc.setFont('helvetica', 'normal'); doc.setTextColor(33,37,41); doc.setFontSize(11);
-      const margin = 40; let y = margin + 40; const maxWidth = doc.internal.pageSize.getWidth() - margin * 2;
-
-      // Title page design
-      const w = doc.internal.pageSize.getWidth();
+      // Overview
       const ov = itineraryData?.overview || {};
-      const mainTitle = clean(ov?.title || 'Travel Itinerary');
-      const destination = clean(ov?.destination || '');
+      const tripTitle = esc(ov?.title || itineraryData?.title || 'Travel Itinerary');
+      add(`<h1 class="title">${tripTitle}</h1>`);
+      if (ov?.summary) add(`<p class="muted">${esc(ov.summary)}</p>`);
+      const stats = ov?.stats || {};
+      const checkIn = stats?.checkInDate ? new Date(stats.checkInDate).toLocaleDateString() : '';
+      const checkOut = stats?.checkOutDate ? new Date(stats.checkOutDate).toLocaleDateString() : '';
+      const pills = [stats?.durationInDays?`${esc(stats.durationInDays)} days`:'' , stats?.placesVisited?`${esc(stats.placesVisited)} places`:'' , checkIn?`Check-in: ${checkIn}`:'' , checkOut?`Check-out: ${checkOut}`:''].filter(Boolean);
+      if (pills.length) add(`<div class="pill-row">${pills.map(p=>`<span class=\"pill\">${p}</span>`).join('')}</div>`);
 
-      // Hero section with background
-      doc.setFillColor(239, 246, 255); doc.rect(0, 60, w, 200, 'F');
+      // Daily Plan Summary and per-day pages
+      const dp: any[] = Array.isArray(itineraryData?.dailyPlan) ? itineraryData.dailyPlan : [];
+      if (dp.length) {
+        // Summary
+        add(`<div class="section"><div class="sec-title">Daily Plan Summary</div><div class="summary">${dp.map((day:any)=>{
+          const names = (day?.activities||[]).map((a:any)=>esc(a?.name||'')).filter(Boolean).join(', ');
+          return `<div class=\"summary-item\"><strong>Day ${esc(day?.day)}:</strong> ${esc(day?.title||'')} — ${names}</div>`;
+        }).join('')}</div></div>`);
 
-      y = 120;
-      doc.setTextColor(30,64,175); doc.setFontSize(28); doc.setFont(undefined, 'bold');
-      const titleLines = doc.splitTextToSize(mainTitle, maxWidth - 80);
-      titleLines.forEach((line: string) => { doc.text(line, margin + 40, y, { align: 'center', maxWidth: maxWidth - 80 }); y += 35; });
-
-      if (destination) {
-        doc.setTextColor(59,130,246); doc.setFontSize(18);
-        y = addTextBlock(doc, destination, margin + 40, y + 10, maxWidth - 80);
-      }
-
-      const statsCover = ov.stats || {};
-      const ci = statsCover.checkInDate ? formatDate(statsCover.checkInDate) : '';
-      const co = statsCover.checkOutDate ? formatDate(statsCover.checkOutDate) : '';
-      if (ci || co) {
-        doc.setTextColor(17,24,39); doc.setFontSize(12);
-        const datesLine = `${ci ? 'Check-in: ' + ci : ''}${(ci && co) ? '   ' : ''}${co ? 'Check-out: ' + co : ''}`;
-        y = addTextBlock(doc, datesLine, margin + 40, y + 6, maxWidth - 80, 16);
-      }
-      if (ov.summary) {
-        doc.setTextColor(55,65,81); doc.setFontSize(12);
-        y = addTextBlock(doc, String(ov.summary), margin + 40, y + 10, maxWidth - 80, 16);
-      }
-
-      y = 300;
-
-      // Overview section
-      y = addHeading(doc, 'Overview', margin, y, 22, [17,24,39]);
-      if (ov.summary) {
-        doc.setFillColor(248,250,252); doc.rect(margin - 10, y - 5, maxWidth + 20, 80, 'F');
-        y = addTextBlock(doc, String(ov.summary), margin + 10, y + 15, maxWidth - 20, 18); y += 20;
-      }
-      const stats = ov.stats || {};
-      const statBoxes: Array<{label: string, value: string}> = [];
-      if (stats.durationInDays) statBoxes.push({label: 'Duration', value: `${clean(stats.durationInDays)} Days`});
-      if (stats.placesVisited) statBoxes.push({label: 'Places', value: `${clean(stats.placesVisited)} Locations`});
-      if (stats.checkInDate) statBoxes.push({label: 'Check-in', value: formatDate(stats.checkInDate)});
-      if (stats.checkOutDate) statBoxes.push({label: 'Check-out', value: formatDate(stats.checkOutDate)});
-
-      if (statBoxes.length) {
-        const boxW = (maxWidth - (statBoxes.length - 1) * 15) / statBoxes.length;
-        statBoxes.forEach((box, i) => {
-          const x = margin + i * (boxW + 15);
-          doc.setFillColor(59,130,246); doc.rect(x, y, boxW, 60, 'F');
-          doc.setTextColor(255,255,255); doc.setFontSize(16); doc.setFont(undefined, 'bold');
-          doc.text(box.value, x + boxW/2, y + 25, { align: 'center' });
-          doc.setFontSize(10); doc.setFont(undefined, 'normal');
-          doc.text(box.label, x + boxW/2, y + 45, { align: 'center' });
+        // Pages
+        add(`<div class="section"><div class="sec-title">Daily Plan</div></div>`);
+        dp.forEach((day:any)=>{
+          add(`<div class="page-day">
+            <div class="sub-title">Day ${esc(day?.day)}: ${esc(day?.title||'')}</div>
+            ${(day?.activities||[]).slice(0,4).map((act:any)=>{
+              const img = (act?.imageLinks && act.imageLinks[0]) || (act?.imagelinks && act.imagelinks[0]) || '';
+              const name = esc(act?.name||'');
+              const rating = act?.rating ? `⭐ ${esc(act.rating)}` : '';
+              const desc = esc(act?.description||'');
+              return `
+                <div class=\"act-card no-break\">\n                  ${img ? `<img class=\"act-img-right\" src=\"${img}\" alt=\"${name}\">` : ''}\n                  <div class=\"act-name\">${name} ${rating?`<span class=\"act-meta\">${rating}</span>`:''}</div>\n                  ${desc?`<div class=\"act-desc\">${desc}</div>`:''}\n                  <div style=\"clear:both\"></div>\n                </div>
+              `;
+            }).join('')}
+          </div>`);
         });
-        y += 80;
-      }
-      doc.setTextColor(33,37,41);
-      y = divider(doc, y, margin, maxWidth);
-
-      // Quick Daily Summary (no activities list here)
-      const dp = Array.isArray(itineraryData?.dailyPlan) ? itineraryData.dailyPlan : [];
-      if (dp.length) {
-        y = addHeading(doc, 'Quick Daily Summary', margin, y, 16);
-        for (const day of dp) {
-          y = ensureSpace(doc, y, margin);
-          const count = (day?.activities || []).length;
-          y = addTextBlock(doc, `• Day ${clean(day?.day)}: ${clean(day?.title)} — ${count} activities`, margin, y, maxWidth);
-        }
-        y += 10; y = divider(doc, y, margin, maxWidth);
       }
 
-      // Daily Plan with activities and photos
-      if (dp.length) {
-        y = addHeading(doc, 'Daily Plan', margin, y, 20);
-        for (const day of dp) {
-          y = ensureSpace(doc, y, margin);
-          y = addHeading(doc, `Day ${clean(day?.day)}: ${clean(day?.title)}`, margin, y, 15, [17,24,39]);
-          for (const act of (day?.activities || [])) {
-            y = ensureSpace(doc, y, margin);
-
-            // Activity card background
-            doc.setFillColor(250,251,252); doc.rect(margin - 5, y - 8, maxWidth + 10, 90, 'F');
-            doc.setDrawColor(229,231,235); doc.rect(margin - 5, y - 8, maxWidth + 10, 90);
-
-            const left = margin + 5; const imgW = 96; const imgH = 72; let usedLeft = left;
-            const imgUrl = (act?.imageLinks && act.imageLinks[0]) || (act?.imagelinks && act.imagelinks[0]) || '';
-            if (imgUrl) {
-              const dataUrl = await toDataURL(imgUrl);
-              if (dataUrl) {
-                doc.addImage(dataUrl, 'JPEG', left, y, imgW, imgH);
-                usedLeft = left + imgW + 15;
-              }
-            }
-
-            const name = clean(act?.name);
-            const desc = clean(act?.description);
-            const rating = clean(act?.rating);
-
-            // Activity name with rating
-            doc.setTextColor(17,24,39); doc.setFont(undefined, 'bold'); doc.setFontSize(12);
-            y = addTextBlock(doc, name, usedLeft, y + 12, maxWidth - (usedLeft - margin) - 10);
-
-            if (rating) {
-              doc.setTextColor(245,158,11); doc.setFontSize(10);
-              doc.text(`⭐ ${rating}`, usedLeft, y + 5);
-              y += 12;
-            }
-
-            // Description
-            doc.setTextColor(75,85,99); doc.setFont(undefined, 'normal'); doc.setFontSize(10);
-            y = addTextBlock(doc, desc, usedLeft, y, maxWidth - (usedLeft - margin) - 10, 14);
-            y += 20;
-          }
-          y += 4;
-        }
-        y = divider(doc, y, margin, maxWidth);
-      }
-
-      // Explore More
-      const em = Array.isArray(itineraryData?.exploreMore) ? itineraryData.exploreMore : [];
+      // Explore More (image first then data)
+      const em: any[] = Array.isArray(itineraryData?.exploreMore) ? itineraryData.exploreMore : [];
       if (em.length) {
-        y = addHeading(doc, 'Explore More', margin, y, 20);
-        for (const item of em) {
-          y = ensureSpace(doc, y, margin);
-          const imgUrl = (item?.imageLinks && item.imageLinks[0]) || (item?.imagelinks && item.imagelinks[0]) || '';
-          if (imgUrl) {
-            const dataUrl = await toDataURL(imgUrl);
-            if (dataUrl) { doc.addImage(dataUrl, 'JPEG', margin, y, 120, 86); }
-          }
-          const name = clean(item?.name); const desc = clean(item?.description || item?.overview);
-          const startX = imgUrl ? margin + 130 : margin; y = addTextBlock(doc, name, startX, y + 10, maxWidth - (startX - margin));
-          y = addTextBlock(doc, desc, startX, y, maxWidth - (startX - margin)); y += 12;
-        }
-        y = divider(doc, y, margin, maxWidth);
+        add(`<div class="section"><div class="sec-title">Explore More</div></div>`);
+        em.forEach((it:any)=>{
+          const img = (it?.imageLinks && it.imageLinks[0]) || (it?.imagelinks && it.imagelinks[0]) || '';
+          const name = esc(it?.name||'');
+          const rating = it?.rating ? `⭐ ${esc(it.rating)}` : '';
+          const desc = esc(it?.description || it?.overview || '');
+          add(`
+            <div class="card no-break">
+              ${img ? `<img class="img" src="${img}" alt="${name}">` : ''}
+              <div class="meta">
+                <div class="name">${name}</div>
+                ${rating?`<div class="rating">${rating}</div>`:''}
+                ${desc?`<div class="desc">${desc}</div>`:''}
+              </div>
+            </div>
+          `);
+        });
       }
 
-      // Hotels
+      // Hotels (new page, compact)
       const hotels = itineraryData?.hotelRecommendations || {};
-      const cheapest = hotels?.cheapest || []; const highest = hotels?.highestRated || [];
+      const cheapest = Array.isArray(hotels?.cheapest)? hotels.cheapest : [];
+      const highest = Array.isArray(hotels?.highestRated)? hotels.highestRated : [];
       if (cheapest.length || highest.length) {
-        y = addHeading(doc, 'Hotels', margin, y, 20);
-        y = addHeading(doc, 'Hotel Recommendations', margin, y, 16);
-        if (cheapest.length) {
-          y = addHeading(doc, 'Cheapest Options', margin, y, 13);
-          for (const h of cheapest) {
-            y = ensureSpace(doc, y, margin);
-            const imgUrl = (h?.imageLinks && h.imageLinks[0]) || (h?.imagelinks && h.imagelinks[0]) || '';
-            if (imgUrl) { const dataUrl = await toDataURL(imgUrl); if (dataUrl) doc.addImage(dataUrl, 'JPEG', margin, y, 120, 86); }
-            const name = clean(h?.name);
-           const detailsLine = `${clean(h?.rating) ? 'Rating: ' + clean(h?.rating) + '   ' : ''}${h?.price != null ? 'Price: ' + formatINR(h?.price) : ''}`;
-           const amenities = Array.isArray(h?.amenities) ? h.amenities.map((a: any) => clean(a)).filter(Boolean).slice(0, 6).join(', ') : '';
-           const startX = imgUrl ? margin + 130 : margin; y = addTextBlock(doc, name, startX, y + 12, maxWidth - (startX - margin));
-           y = addTextBlock(doc, detailsLine, startX, y, maxWidth - (startX - margin));
-           if (amenities) { y = addTextBlock(doc, `Amenities: ${amenities}`, startX, y, maxWidth - (startX - margin)); }
-           y += 12;
-          }
-          y += 6;
-        }
-        if (highest.length) {
-          y = addHeading(doc, 'Highest Rated', margin, y, 13);
-          for (const h of highest) {
-            y = ensureSpace(doc, y, margin);
-            const imgUrl = (h?.imageLinks && h.imageLinks[0]) || (h?.imagelinks && h.imagelinks[0]) || '';
-            if (imgUrl) { const dataUrl = await toDataURL(imgUrl); if (dataUrl) doc.addImage(dataUrl, 'JPEG', margin, y, 120, 86); }
-            const name = clean(h?.name);
-           const detailsLine = `${clean(h?.rating) ? 'Rating: ' + clean(h?.rating) + '   ' : ''}${h?.price != null ? 'Price: ' + formatINR(h?.price) : ''}`;
-           const amenities = Array.isArray(h?.amenities) ? h.amenities.map((a: any) => clean(a)).filter(Boolean).slice(0, 6).join(', ') : '';
-           const startX = imgUrl ? margin + 130 : margin; y = addTextBlock(doc, name, startX, y + 12, maxWidth - (startX - margin));
-           y = addTextBlock(doc, detailsLine, startX, y, maxWidth - (startX - margin));
-           if (amenities) { y = addTextBlock(doc, `Amenities: ${amenities}`, startX, y, maxWidth - (startX - margin)); }
-           y += 12;
-          }
-        }
-        y = divider(doc, y, margin, maxWidth);
+        add(`<div class="section" style="page-break-before: always; break-before: page;"><div class="sec-title">Hotel Recommendations</div></div>`);
+        if (cheapest.length) add(`<div class="sub-title">Cheapest Options</div>`);
+        cheapest.slice(0,2).forEach((h:any)=>{
+          const img = (h?.imageLinks && h.imageLinks[0]) || (h?.imagelinks && h.imagelinks[0]) || '';
+          const name = esc(h?.name||'');
+          const rating = h?.rating ? `⭐ ${esc(h.rating)}` : '';
+          const price = h?.price!=null ? `₹ ${Number(h.price).toLocaleString('en-IN')}` : '';
+          const amenities = Array.isArray(h?.amenities)? h.amenities.slice(0,6).join(', ') : '';
+          add(`
+            <div class="no-break">
+              <div class="hotel-row">
+                ${img?`<img class=\"hotel-img\" src=\"${img}\" alt=\"${name}\">`: `<div></div>`}
+                <div>
+                  <div class="meta name">${name}</div>
+                  <div class="muted">${[rating, price].filter(Boolean).join('  •  ')}</div>
+                  ${amenities?`<div class=\"muted\">Amenities: ${amenities}</div>`:''}
+                </div>
+              </div>
+            </div>
+          `);
+        });
+        if (highest.length) add(`<div class="sub-title">Highest Rated</div>`);
+        highest.slice(0,2).forEach((h:any)=>{
+          const img = (h?.imageLinks && h.imageLinks[0]) || (h?.imagelinks && h.imagelinks[0]) || '';
+          const name = esc(h?.name||'');
+          const rating = h?.rating ? `⭐ ${esc(h.rating)}` : '';
+          const price = h?.price!=null ? `₹ ${Number(h.price).toLocaleString('en-IN')}` : '';
+          const amenities = Array.isArray(h?.amenities)? h.amenities.slice(0,6).join(', ') : '';
+          add(`
+            <div class="no-break">
+              <div class="hotel-row">
+                ${img?`<img class=\"hotel-img\" src=\"${img}\" alt=\"${name}\">`: `<div></div>`}
+                <div>
+                  <div class="meta name">${name}</div>
+                  <div class="muted">${[rating, price].filter(Boolean).join('  •  ')}</div>
+                  ${amenities?`<div class=\"muted\">Amenities: ${amenities}</div>`:''}
+                </div>
+              </div>
+            </div>
+          `);
+        });
       }
 
-      // Flights
+      // Flights (new page, card layout)
       const flights = itineraryData?.flightSuggestions || {};
-      const cheapestF = flights?.cheapest || []; const shortest = flights?.shortestDuration || [];
-      if ((cheapestF && cheapestF.length) || (shortest && shortest.length)) {
-        y = addHeading(doc, 'Flights', margin, y, 20);
-        y = addHeading(doc, 'Flight Suggestions', margin, y, 16);
-        const flightLine = (f: any) => {
-          const airline = clean(f?.airline || f?.carrier_name || f?.carrier || '');
-          const from = clean(f?.from || f?.departureairportcode || '');
-          const to = clean(f?.to || f?.arrivalairportcode || '');
-          const price = f?.price != null ? formatINR(f?.price) : clean(f?.amount || '');
+      const cheapestF = Array.isArray(flights?.cheapest) ? flights.cheapest : [];
+      const shortest = Array.isArray(flights?.shortestDuration) ? flights.shortestDuration : [];
+      if ((cheapestF.length || shortest.length)) {
+        add(`<div class=\"section\" style=\"page-break-before: always; break-before: page;\"><div class=\"sec-title\">Flight Suggestions</div></div>`);
+        const renderFlight = (f:any)=>{
+          const logo = esc(f?.airline_logo || f?.carrier_logo || '');
+          const airline = esc(f?.airline || f?.carrier_name || f?.carrier || '');
+          const from = esc(f?.from || f?.departureairportcode || '');
+          const to = esc(f?.to || f?.arrivalairportcode || '');
+          const price = f?.price!=null ? `₹ ${Number(f.price).toLocaleString('en-IN')}` : esc(f?.amount||'');
           const dep = new Date(f?.departuredatetime || f?.departureDateTime || f?.departure_time || f?.departure);
           const arr = new Date(f?.arrivaldatetime || f?.arrivalDateTime || f?.arrival_time || f?.arrival);
-          const t = (d: Date) => isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+          const t = (d: Date) => isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
           const depT = t(dep); const arrT = t(arr);
           let dur = '';
           const minutes = parseFloat(String(f?.totalduration || f?.totalDuration || f?.duration || ''));
           if (!isNaN(minutes)) { const h = Math.floor(minutes/60); const m = Math.round(minutes%60); dur = `${h}h ${m}m`; }
-          const timeSeg = depT && arrT ? `${depT}–${arrT}${dur?`  (${dur})`:''}` : (dur || '');
-          return `${airline}   ${from} → ${to}   ${timeSeg}   ${price}`;
+          return `
+            <div class=\"flight-card no-break\">\n              ${logo?`<img class=\"flight-logo\" src=\"${logo}\" alt=\"${airline}\">`:'<div></div>'}\n              <div>\n                <div class=\"flight-title\">${airline} • ${from} → ${to}</div>\n                <div class=\"flight-sub\">${depT} – ${arrT}${dur?` • ${dur}`:''}</div>\n              </div>\n              <div class=\"flight-price\">${price}</div>\n            </div>
+          `;
         };
-        if (cheapestF.length) {
-          y = addHeading(doc, 'Cheapest', margin, y, 13);
-          for (const f of cheapestF) {
-            y = ensureSpace(doc, y, margin);
-            const logo = f?.airline_logo || f?.carrier_logo || '';
-            if (logo) { const dataUrl = await toDataURL(logo); if (dataUrl) doc.addImage(dataUrl, 'JPEG', margin, y, 42, 42); }
-            const startX = logo ? margin + 52 : margin;
-            y = addTextBlock(doc, flightLine(f), startX, y + 16, maxWidth - (startX - margin)); y += 8;
-          }
-          y += 4;
-        }
-        if (shortest.length) {
-          y = addHeading(doc, 'Shortest Duration', margin, y, 13);
-          for (const f of shortest) {
-            y = ensureSpace(doc, y, margin);
-            const logo = f?.airline_logo || f?.carrier_logo || '';
-            if (logo) { const dataUrl = await toDataURL(logo); if (dataUrl) doc.addImage(dataUrl, 'JPEG', margin, y, 42, 42); }
-            const startX = logo ? margin + 52 : margin;
-            y = addTextBlock(doc, flightLine(f), startX, y + 16, maxWidth - (startX - margin)); y += 8;
-          }
-        }
+        if (cheapestF.length) add(`<div class=\"sub-title\">Cheapest</div>`);
+        cheapestF.slice(0,3).forEach((f:any)=> add(renderFlight(f)) );
+        if (shortest.length) add(`<div class=\"sub-title\">Shortest Duration</div>`);
+        shortest.slice(0,3).forEach((f:any)=> add(renderFlight(f)) );
       }
 
-      decoratePages(doc, clean(ov?.title || ''));
-      doc.save('itinerary.pdf');
+      document.body.appendChild(wrapper);
+      ensureImgCORS(wrapper);
+
+      // Preload images and replace any that fail to load with placeholder to avoid html2canvas errors
+      const imgs = Array.from(wrapper.querySelectorAll('img')) as HTMLImageElement[];
+      const preload = (imgEl: HTMLImageElement) => new Promise<void>((resolve) => {
+        const test = new Image();
+        test.crossOrigin = 'anonymous';
+        let settled = false;
+        const onSuccess = () => { try { imgEl.setAttribute('crossorigin','anonymous'); imgEl.referrerPolicy = 'no-referrer'; } catch {};
+          if (!settled) { settled = true; resolve(); }
+        };
+        const onFail = () => { try { imgEl.src = imageComingSoon; imgEl.setAttribute('crossorigin','anonymous'); imgEl.referrerPolicy = 'no-referrer'; } catch {};
+          if (!settled) { settled = true; resolve(); }
+        };
+        test.onload = onSuccess;
+        test.onerror = onFail;
+        // timeout in 2500ms
+        const to = setTimeout(() => { onFail(); }, 2500);
+        test.src = imgEl.src || '';
+      });
+
+      await Promise.all(imgs.map(i => preload(i)));
+
+      const opt = {
+        margin: [20, 15, 20, 15],
+        filename: 'itinerary.pdf',
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['css', 'legacy'], avoid: ['img', '.no-break'] }
+      } as any;
+
+      await w.html2pdf().from(wrapper).set(opt).save();
+      document.body.removeChild(wrapper);
     } catch (e) {
-      console.error('PDF generation failed', e);
+      console.error('Itinerary PDF generation failed', e);
+      alert('Unable to generate itinerary PDF automatically in this browser.');
     }
   };
 
   const pdfBtn = bubble.querySelector(`#${uid}-pdf-btn`);
-  pdfBtn?.addEventListener('click', genPdf);
+  pdfBtn?.addEventListener('click', downloadItineraryPdf);
 
 };
