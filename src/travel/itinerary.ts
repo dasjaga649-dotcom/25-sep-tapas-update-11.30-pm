@@ -526,30 +526,37 @@ export const renderItinerary = (itineraryData: any, isMobile: boolean, chatMessa
       wrapper.style.margin = '0 auto';
       wrapper.innerHTML = `
         <style>
-          .pt-header{display:flex;align-items:center;gap:12pt;margin-bottom:12pt}
-          .pt-title{font-size:16pt;font-weight:700;color:#111827;margin:0}
-          .pt-meta{font-size:9pt;color:#6b7280;margin:2pt 0 0}
-          .pt-logo{height:28pt;width:auto}
-          .section{margin:14pt 0}
-          .sec-title{font-size:14pt;font-weight:700;color:#111827;margin:0 0 6pt}
-          .sub-title{font-size:12pt;font-weight:700;color:#111827;margin:10pt 0 6pt}
+          .title{font-size:18pt;font-weight:800;color:#111827;margin:0 0 2pt}
           .muted{color:#6b7280;font-size:10pt}
+          .section{margin:16pt 0}
+          .sec-title{font-size:14pt;font-weight:700;color:#111827;margin:0 0 8pt}
+          .sub-title{font-size:12pt;font-weight:700;color:#111827;margin:10pt 0 6pt}
+          .pill-row{display:flex;flex-wrap:wrap;gap:6pt;margin:6pt 0}
+          .pill{display:inline-block;padding:4pt 8pt;border-radius:9999px;background:#eef2ff;color:#1f2937;font-size:9.5pt;border:1px solid #e5e7eb}
+          .summary{margin:8pt 0}
+          .summary-item{margin:4pt 0;font-size:10.5pt;color:#374151}
           .no-break{break-inside:avoid;page-break-inside:avoid}
-          .card{border:1px solid #e5e7eb;border-radius:10pt;overflow:hidden;margin:10pt 0}
+          .page-day{page-break-after: always; break-after: page;}
+          .act-card{border:1px solid #e5e7eb;border-radius:10pt;padding:8pt;margin:8pt 0}
+          .act-name{font-weight:700;color:#111827;margin:0 0 4pt;font-size:11pt}
+          .act-meta{color:#f59e0b;font-size:10pt;margin:0 0 4pt}
+          .act-img-right{float:right;width:35%;max-height:140pt;object-fit:cover;margin-left:10pt;border-radius:8pt}
+          .act-desc{color:#4b5563;font-size:10pt;line-height:1.45}
+          .card{border:1px solid #e5e7eb;border-radius:10pt;overflow:hidden;margin:8pt 0}
           .img{display:block;width:100%;height:auto}
           .meta{padding:8pt 10pt}
           .meta .name{font-weight:700;color:#111827;margin:0 0 4pt}
           .meta .rating{color:#f59e0b;font-size:10pt;margin:2pt 0}
           .meta .desc{color:#4b5563;font-size:10pt;margin:4pt 0 0;white-space:pre-wrap}
           .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:10pt}
+          .hotel-row{display:grid;grid-template-columns:80pt 1fr;gap:8pt;align-items:start}
+          .hotel-img{width:80pt;height:60pt;object-fit:cover;border-radius:6pt}
+          .flight-card{border:1px solid #e5e7eb;border-radius:10pt;padding:8pt;margin:8pt 0;display:grid;grid-template-columns:42pt 1fr auto;gap:8pt;align-items:center}
+          .flight-logo{width:42pt;height:42pt;object-fit:contain;border-radius:6pt}
+          .flight-title{font-weight:700;color:#111827;font-size:11pt}
+          .flight-sub{color:#374151;font-size:10pt}
+          .flight-price{font-weight:800;color:#111827;font-size:11pt}
         </style>
-        <div class="pt-header">
-          <img class="pt-logo" src="https://cdn.builder.io/api/v1/image/assets%2F82c0001c5b3640cb80e6ddfae3607779%2Fc6120727ebef4118a2235d13cbf9dfcb?format=webp&width=400" crossorigin="anonymous" />
-          <div>
-            <h1 class="pt-title">Tapas – Itinerary</h1>
-            <p class="pt-meta">Generated on ${new Date().toLocaleString()}</p>
-          </div>
-        </div>
       `;
 
       const esc = (v:any)=> (v==null?'' : String(v));
@@ -558,36 +565,39 @@ export const renderItinerary = (itineraryData: any, isMobile: boolean, chatMessa
 
       // Overview
       const ov = itineraryData?.overview || {};
-      if (ov?.title) add(`<h2 class="sec-title">${esc(ov.title)}</h2>`);
+      const tripTitle = esc(ov?.title || itineraryData?.title || 'Travel Itinerary');
+      add(`<h1 class="title">${tripTitle}</h1>`);
       if (ov?.summary) add(`<p class="muted">${esc(ov.summary)}</p>`);
       const stats = ov?.stats || {};
       const checkIn = stats?.checkInDate ? new Date(stats.checkInDate).toLocaleDateString() : '';
       const checkOut = stats?.checkOutDate ? new Date(stats.checkOutDate).toLocaleDateString() : '';
-      const statsLine = [stats?.durationInDays?`${esc(stats.durationInDays)} days`:'' , stats?.placesVisited?`${esc(stats.placesVisited)} places`:'' , checkIn?`Check-in: ${checkIn}`:'' , checkOut?`Check-out: ${checkOut}`:''].filter(Boolean).join('  •  ');
-      if (statsLine) add(`<p class="muted">${statsLine}</p>`);
+      const pills = [stats?.durationInDays?`${esc(stats.durationInDays)} days`:'' , stats?.placesVisited?`${esc(stats.placesVisited)} places`:'' , checkIn?`Check-in: ${checkIn}`:'' , checkOut?`Check-out: ${checkOut}`:''].filter(Boolean);
+      if (pills.length) add(`<div class="pill-row">${pills.map(p=>`<span class=\"pill\">${p}</span>`).join('')}</div>`);
 
-      // Daily Plan (image first, then details; avoid splitting)
+      // Daily Plan Summary and per-day pages
       const dp: any[] = Array.isArray(itineraryData?.dailyPlan) ? itineraryData.dailyPlan : [];
       if (dp.length) {
+        // Summary
+        add(`<div class="section"><div class="sec-title">Daily Plan Summary</div><div class="summary">${dp.map((day:any)=>{
+          const names = (day?.activities||[]).map((a:any)=>esc(a?.name||'')).filter(Boolean).join(', ');
+          return `<div class=\"summary-item\"><strong>Day ${esc(day?.day)}:</strong> ${esc(day?.title||'')} — ${names}</div>`;
+        }).join('')}</div></div>`);
+
+        // Pages
         add(`<div class="section"><div class="sec-title">Daily Plan</div></div>`);
         dp.forEach((day:any)=>{
-          add(`<div class="sub-title">Day ${esc(day?.day)}: ${esc(day?.title||'')}</div>`);
-          (day?.activities||[]).forEach((act:any)=>{
-            const img = (act?.imageLinks && act.imageLinks[0]) || (act?.imagelinks && act.imagelinks[0]) || '';
-            const name = esc(act?.name||'');
-            const rating = act?.rating ? `⭐ ${esc(act.rating)}` : '';
-            const desc = esc(act?.description||'');
-            add(`
-              <div class="card no-break">
-                ${img ? `<img class="img" src="${img}" alt="${name}">` : ''}
-                <div class="meta">
-                  <div class="name">${name}</div>
-                  ${rating?`<div class="rating">${rating}</div>`:''}
-                  ${desc?`<div class="desc">${desc}</div>`:''}
-                </div>
-              </div>
-            `);
-          });
+          add(`<div class="page-day">
+            <div class="sub-title">Day ${esc(day?.day)}: ${esc(day?.title||'')}</div>
+            ${(day?.activities||[]).slice(0,4).map((act:any)=>{
+              const img = (act?.imageLinks && act.imageLinks[0]) || (act?.imagelinks && act.imagelinks[0]) || '';
+              const name = esc(act?.name||'');
+              const rating = act?.rating ? `⭐ ${esc(act.rating)}` : '';
+              const desc = esc(act?.description||'');
+              return `
+                <div class=\"act-card no-break\">\n                  ${img ? `<img class=\"act-img-right\" src=\"${img}\" alt=\"${name}\">` : ''}\n                  <div class=\"act-name\">${name} ${rating?`<span class=\"act-meta\">${rating}</span>`:''}</div>\n                  ${desc?`<div class=\"act-desc\">${desc}</div>`:''}\n                  <div style=\"clear:both\"></div>\n                </div>
+              `;
+            }).join('')}
+          </div>`);
         });
       }
 
@@ -613,59 +623,81 @@ export const renderItinerary = (itineraryData: any, isMobile: boolean, chatMessa
         });
       }
 
-      // Hotels (image then data)
+      // Hotels (new page, compact)
       const hotels = itineraryData?.hotelRecommendations || {};
       const cheapest = Array.isArray(hotels?.cheapest)? hotels.cheapest : [];
       const highest = Array.isArray(hotels?.highestRated)? hotels.highestRated : [];
       if (cheapest.length || highest.length) {
-        add(`<div class="section"><div class="sec-title">Hotel Recommendations</div></div>`);
+        add(`<div class="section" style="page-break-before: always; break-before: page;"><div class="sec-title">Hotel Recommendations</div></div>`);
         if (cheapest.length) add(`<div class="sub-title">Cheapest Options</div>`);
-        cheapest.forEach((h:any)=>{
+        cheapest.slice(0,2).forEach((h:any)=>{
           const img = (h?.imageLinks && h.imageLinks[0]) || (h?.imagelinks && h.imagelinks[0]) || '';
           const name = esc(h?.name||'');
           const rating = h?.rating ? `⭐ ${esc(h.rating)}` : '';
           const price = h?.price!=null ? `₹ ${Number(h.price).toLocaleString('en-IN')}` : '';
-          const amenities = Array.isArray(h?.amenities)? h.amenities.slice(0,8).join(', ') : '';
+          const amenities = Array.isArray(h?.amenities)? h.amenities.slice(0,6).join(', ') : '';
           add(`
-            <div class="card no-break">
-              ${img ? `<img class="img" src="${img}" alt="${name}">` : ''}
-              <div class="meta">
-                <div class="name">${name}</div>
-                <div class="muted">${[rating, price].filter(Boolean).join('  •  ')}</div>
-                ${amenities?`<div class="desc">Amenities: ${amenities}</div>`:''}
+            <div class="no-break">
+              <div class="hotel-row">
+                ${img?`<img class=\"hotel-img\" src=\"${img}\" alt=\"${name}\">`: `<div></div>`}
+                <div>
+                  <div class="meta name">${name}</div>
+                  <div class="muted">${[rating, price].filter(Boolean).join('  •  ')}</div>
+                  ${amenities?`<div class=\"muted\">Amenities: ${amenities}</div>`:''}
+                </div>
               </div>
             </div>
           `);
         });
         if (highest.length) add(`<div class="sub-title">Highest Rated</div>`);
-        highest.forEach((h:any)=>{
+        highest.slice(0,2).forEach((h:any)=>{
           const img = (h?.imageLinks && h.imageLinks[0]) || (h?.imagelinks && h.imagelinks[0]) || '';
           const name = esc(h?.name||'');
-          const rating = h?.rating ? `�� ${esc(h.rating)}` : '';
+          const rating = h?.rating ? `⭐ ${esc(h.rating)}` : '';
           const price = h?.price!=null ? `₹ ${Number(h.price).toLocaleString('en-IN')}` : '';
-          const amenities = Array.isArray(h?.amenities)? h.amenities.slice(0,8).join(', ') : '';
+          const amenities = Array.isArray(h?.amenities)? h.amenities.slice(0,6).join(', ') : '';
           add(`
-            <div class="card no-break">
-              ${img ? `<img class="img" src="${img}" alt="${name}">` : ''}
-              <div class="meta">
-                <div class="name">${name}</div>
-                <div class="muted">${[rating, price].filter(Boolean).join('  •  ')}</div>
-                ${amenities?`<div class="desc">Amenities: ${amenities}</div>`:''}
+            <div class="no-break">
+              <div class="hotel-row">
+                ${img?`<img class=\"hotel-img\" src=\"${img}\" alt=\"${name}\">`: `<div></div>`}
+                <div>
+                  <div class="meta name">${name}</div>
+                  <div class="muted">${[rating, price].filter(Boolean).join('  •  ')}</div>
+                  ${amenities?`<div class=\"muted\">Amenities: ${amenities}</div>`:''}
+                </div>
               </div>
             </div>
           `);
         });
       }
 
-      // Flights (keep as-is by cloning current flights section)
-      const flightsEl = bubble.querySelector('#flights-page') as HTMLElement | null;
-      if (flightsEl) {
-        const clone = flightsEl.cloneNode(true) as HTMLElement;
-        // ensure visible
-        clone.style.display = 'block';
-        // remove tab-only wrappers if any
-        add(`<div class="section"><div class="sec-title">Flights</div></div>`);
-        wrapper.appendChild(clone);
+      // Flights (new page, card layout)
+      const flights = itineraryData?.flightSuggestions || {};
+      const cheapestF = Array.isArray(flights?.cheapest) ? flights.cheapest : [];
+      const shortest = Array.isArray(flights?.shortestDuration) ? flights.shortestDuration : [];
+      if ((cheapestF.length || shortest.length)) {
+        add(`<div class=\"section\" style=\"page-break-before: always; break-before: page;\"><div class=\"sec-title\">Flight Suggestions</div></div>`);
+        const renderFlight = (f:any)=>{
+          const logo = esc(f?.airline_logo || f?.carrier_logo || '');
+          const airline = esc(f?.airline || f?.carrier_name || f?.carrier || '');
+          const from = esc(f?.from || f?.departureairportcode || '');
+          const to = esc(f?.to || f?.arrivalairportcode || '');
+          const price = f?.price!=null ? `₹ ${Number(f.price).toLocaleString('en-IN')}` : esc(f?.amount||'');
+          const dep = new Date(f?.departuredatetime || f?.departureDateTime || f?.departure_time || f?.departure);
+          const arr = new Date(f?.arrivaldatetime || f?.arrivalDateTime || f?.arrival_time || f?.arrival);
+          const t = (d: Date) => isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const depT = t(dep); const arrT = t(arr);
+          let dur = '';
+          const minutes = parseFloat(String(f?.totalduration || f?.totalDuration || f?.duration || ''));
+          if (!isNaN(minutes)) { const h = Math.floor(minutes/60); const m = Math.round(minutes%60); dur = `${h}h ${m}m`; }
+          return `
+            <div class=\"flight-card no-break\">\n              ${logo?`<img class=\"flight-logo\" src=\"${logo}\" alt=\"${airline}\">`:'<div></div>'}\n              <div>\n                <div class=\"flight-title\">${airline} • ${from} → ${to}</div>\n                <div class=\"flight-sub\">${depT} – ${arrT}${dur?` • ${dur}`:''}</div>\n              </div>\n              <div class=\"flight-price\">${price}</div>\n            </div>
+          `;
+        };
+        if (cheapestF.length) add(`<div class=\"sub-title\">Cheapest</div>`);
+        cheapestF.slice(0,3).forEach((f:any)=> add(renderFlight(f)) );
+        if (shortest.length) add(`<div class=\"sub-title\">Shortest Duration</div>`);
+        shortest.slice(0,3).forEach((f:any)=> add(renderFlight(f)) );
       }
 
       document.body.appendChild(wrapper);
